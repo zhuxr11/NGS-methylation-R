@@ -1,0 +1,311 @@
+---
+output: github_document
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+# This sets the overall chunk and output style
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "README_files/",
+  out.width = "100%"
+)
+
+# This hook enables reference to variables created later on (e.g. in abstract)
+# To refer to such variables, use <%= variable %> or <% code %> (?brew::brew)
+knitr::knit_hooks$set(document = function(x){
+  x1 = paste(x, collapse = '\n')
+  paste(capture.output(brew::brew(text = x1)), collapse = '\n')
+})
+```
+
+# Processing methylation NGS data with methylKit
+
+**Author**: Xiurui Zhu<br />
+**Modified**: `r file.info("README.Rmd")$mtime`<br />
+**Compiled**: `r Sys.time()`
+
+## Introduction
+
+Next-generation sequencing (NGS) is a powerful tool for analyzing gene sequences. Methylation sequencing is a special type of NGS technique in that sodium bisulfate converts unmethylated Cs to Us. In this file, we will go through the analysis of methylation NGS data according to [a vignette from methylKit package](https://github.com/al2na/methylKit) in R.
+
+## Methods
+
+### Data preparation
+
+To facilitate the analyses in the workflow, we need to load the following packages: `tidyverse`, `magrittr`, `rlang`, `methylKit`, `ComplexHeatmap` and `genomation`.
+
+```{r libraries, message=FALSE, warning=FALSE, results='hold'}
+# Define a function to check, install (if necessary) and load packages
+check_packages <- function(pkg_name,
+                           repo = c("cran", "github", "Bioconductor"),
+                           repo_path) {
+  repo <- match.arg(repo)
+  # Load installed packages
+  inst_packages <- installed.packages()
+  if (pkg_name %in% inst_packages == FALSE) {
+    cat("* Installing: ", pkg_name, ", repo = ", repo, "\n", sep = "")
+    switch(repo,
+           cran = install.packages(pkg_name),
+           github = {
+             if ("devtools" %in% inst_packages == FALSE) {
+               install.packages("devtools")
+             }
+             devtools::install_github(repo_path)
+           },
+           Bioconductor = {
+             if ("BiocManager" %in% inst_packages == FALSE) {
+               install.packages("BiocManager")
+             }
+             BiocManager::install(pkg_name)
+           })
+  } else {
+    cat("* Package already installed: ", pkg_name, "\n", sep = "")
+  }
+  suppressPackageStartupMessages(
+    library(pkg_name, character.only = TRUE)
+  )
+}
+
+# CRAN packages
+check_packages("tidyverse", repo = "cran")
+purrr::walk(.x = c("magrittr", "rlang"),
+            .f = check_packages, repo = "cran")
+# github packages
+purrr::walk(.x = c("methylKit", "ComplexHeatmap", "genomation"),
+            .f = check_packages, repo = "Bioconductor")
+```
+Methylation percentage data from 4 "txt" files were loaded.
+
+```{r load methyl-data}
+load_file_names <- c("test1.myCpG.txt", "test2.myCpG.txt",
+               "control1.myCpG.txt", "control2.myCpG.txt") %>%
+  purrr::map(~ system.file("extdata", .x, package = "methylKit"))
+
+sample_names <- c("test1", "test2", "ctrl1", "ctrl2")
+load_data <- load_file_names %>%
+  methylKit::methRead(
+    sample.id = as.list(sample_names),
+    assembly = "hg18",
+    treatment = c(1, 1, 0, 0),
+    context = "CpG",
+    mincov = 10
+  )
+tibble::glimpse(load_data)
+```
+
+### Data profiles
+
+We summarize methylation percentage of each sample.
+
+```{r summarize-methyl-percent, fig.height=5}
+par(mfrow = c(ceiling(length(load_data) / 2L), 2L))
+invisible(
+  load_data %>%
+    purrr::map(~ {
+      methylKit::getMethylationStats(.x, plot = TRUE, both.strands = FALSE)
+    })
+)
+```
+
+We summarize methylation coverage of each sample.
+
+```{r summarize-methyl-coverage, fig.height=5}
+par(mfrow = c(ceiling(length(load_data) / 2L), 2L))
+invisible(
+  load_data %>%
+    purrr::map(~ {
+      methylKit::getCoverageStats(.x, plot = TRUE, both.strands = FALSE)
+    })
+)
+```
+
+### Data merging
+
+We then merge samples for descriptive statistics.
+
+```{r merge-samples}
+merge_data <- load_data %>%
+  methylKit::unite(destrand = FALSE)
+head(merge_data)
+```
+
+## Results
+
+### Correlation analysis
+
+```{r calc-corr}
+invisible(
+  methylKit::getCorrelation(merge_data, plot = TRUE)
+)
+```
+
+### Hierarchical clustering
+
+We perform hierarchical clustering based on the correlation coefficients.
+
+```{r calc-unsup-cluster}
+invisible(
+  methylKit::clusterSamples(
+    merge_data,
+    dist = "correlation",
+    method = "ward",
+    plot = TRUE
+  )
+)
+```
+
+### Principle component analysis (PCA)
+
+We perform PCA on the merged data.
+
+```{r calc-PCA}
+invisible(
+  {
+    methylKit::PCASamples(merge_data, screeplot = TRUE)
+    methylKit::PCASamples(merge_data, screeplot = FALSE)
+  }
+)
+```
+
+### Finding differentially methylated loci
+
+We calculate differentially methylated loci.
+
+```{r find-diff-methyl}
+merge_data_diff <- merge_data %>%
+  methylKit::calculateDiffMeth()
+merge_data_diff_25p <- merge_data_diff %>%
+  methylKit::getMethylDiff(difference = 25, qvalue = 0.01)
+head(merge_data_diff_25p)
+```
+
+We plot the percentage of hypo-/hyper-methylated loci per chromosome.
+
+```{r plot-diff-methyl-per-chrom}
+invisible(
+  merge_data_diff %>%
+    methylKit::diffMethPerChr(
+      plot = TRUE,
+      qvalue.cutoff = 0.01,
+      meth.cutoff = 25
+    )
+)
+```
+
+### Heatmap of significant methylation loci
+
+We further plot a heatmap of methylation percentage of significant loci with hierarchical clustering on Pearson's correlation.
+
+```{r plot-methyl-percent, warning=FALSE, fig.height=12}
+merge_data_perc <- merge_data %>%
+  tibble::as_tibble() %>%
+  dplyr::semi_join(
+    merge_data_diff_25p %>%
+      tibble::as_tibble(),
+    by = c("chr", "start", "end", "strand")
+  ) %>%
+  tidyr::pivot_longer(cols = !c("chr", "start", "end", "strand"),
+                      names_to = "metric",
+                      values_to = "value",
+                      values_drop_na = FALSE) %>%
+  tidyr::unite(col = "Feature_Name", chr, start, end, strand, sep = "_") %>%
+  dplyr::mutate(sample_idx = metric %>%
+                  stringr::str_extract("[0-9]$") %>%
+                  as.integer(),
+                .after = "metric") %>%
+  dplyr::mutate_at("metric",
+                   ~ .x %>%
+                     stringr::str_replace("[0-9]$", "")) %>%
+  dplyr::mutate(Sample_Name = sample_names[sample_idx]) %>%
+  tidyr::pivot_wider(id_cols = c("Feature_Name", "Sample_Name"),
+                     names_from = "metric",
+                     values_from = "value",
+                     values_fill = NA_real_) %>%
+  dplyr::group_by(Feature_Name, Sample_Name) %>%
+  dplyr::summarize(methyl_perc = numCs / (numCs + numTs),
+                   .groups = "drop") %>%
+  tidyr::pivot_wider(id_cols = "Feature_Name",
+                     names_from = "Sample_Name",
+                     values_from = "methyl_perc",
+                     values_fill = NA_real_) %>%
+  tibble::column_to_rownames("Feature_Name") %>%
+  as.matrix()
+
+merge_data_heatmap <- merge_data_perc %>%
+  ComplexHeatmap::Heatmap(
+    col = circlize::colorRamp2(c(0, 0.5, 1),
+                               c("#00FF00", "#000000", "#FF0000")),
+    name = "Percentage",
+    cluster_rows = TRUE,
+    cluster_columns = TRUE,
+    clustering_method_rows = "average",
+    clustering_method_columns = "average",
+    clustering_distance_rows = function(x) {
+      as.dist(1 - cor(t(x), method = "pearson"))
+    },
+    clustering_distance_columns = function(x) {
+      as.dist(1 - cor(t(x), method = "pearson"))
+    },
+    row_names_gp = grid::gpar(fontsize = 6),
+    column_names_gp = grid::gpar(fontsize = 12),
+    column_names_rot = 0,
+    column_names_centered = TRUE,
+    heatmap_width = grid::unit(1, "native"),
+    heatmap_height = grid::unit(2, "native"),
+    heatmap_legend_param = list(
+      at = seq(0, 1, 0.2),
+      labels = scales::percent(seq(0, 1, 0.2))
+    )
+  )
+ComplexHeatmap::draw(merge_data_heatmap)
+```
+
+### Methylation annotations
+
+We annotate the genes where differentially methylated loci reside.
+
+```{r anno-diff-methyl-genes}
+anno_data_gene <- system.file("extdata",
+                              "refseq.hg18.bed.txt", 
+                              package = "methylKit") %>%
+  genomation::readTranscriptFeatures()
+merge_data_diff_25p %>%
+  as("GRanges") %>%
+  genomation::annotateWithGeneParts(anno_data_gene)
+```
+
+We annotate the CpG islands where differentially methylated loci reside.
+
+```{r anno-diff-methyl-cpg}
+anno_data_cpg <- system.file("extdata",
+                             "cpgi.hg18.bed.txt", 
+                             package = "methylKit") %>%
+  genomation::readFeatureFlank()
+merge_data_diff_25p %>%
+  as("GRanges") %>%
+  genomation::annotateWithFeatureFlank(
+    anno_data_cpg[["features"]],
+    anno_data_cpg[["flanks"]],
+    feature.name = "CpGi",
+    flank.name = "shores"
+  )
+```
+
+### Regional distribution of CpG islands per promoter
+
+```{r count-region-methyl}
+promoter_count <- load_data %>%
+  methylKit::regionCounts(anno_data_gene[["promoters"]])
+promoter_count %>%
+  purrr::walk(~ print(head(.x)))
+```
+
+## Session info
+
+This file was compiled with the following packages and versions:
+
+```{r session-info}
+utils::sessionInfo()
+```

@@ -76,11 +76,11 @@ purrr::walk(.x = c("magrittr", "rlang"),
 purrr::walk(.x = c("methylKit", "ComplexHeatmap", "genomation"),
             .f = check_packages, repo = "Bioconductor")
 ```
-Methylation percentage data from 4 "txt" files were loaded.
+Methylation percentage data from 4 "txt" files were loaded. Such input files may be obtained from [AMP pipeline](http://code.google.com/p/amp-errbs/) developed for aligning RRBS reads or from `methylKit::processBismarkAln()` function with "sam" or "bam" file name(s) as input(s).
 
 ```{r load methyl-data}
 load_file_names <- c("test1.myCpG.txt", "test2.myCpG.txt",
-               "control1.myCpG.txt", "control2.myCpG.txt") %>%
+                     "control1.myCpG.txt", "control2.myCpG.txt") %>%
   purrr::map(~ system.file("extdata", .x, package = "methylKit"))
 
 sample_names <- c("test1", "test2", "ctrl1", "ctrl2")

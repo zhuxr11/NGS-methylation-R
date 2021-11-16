@@ -1,8 +1,8 @@
 
 # Processing methylation NGS data with methylKit
 
-**Author**: Xiurui Zhu<br /> **Modified**: 2021-11-16 23:39:05<br />
-**Compiled**: 2021-11-16 23:39:16
+**Author**: Xiurui Zhu<br /> **Modified**: 2021-11-16 23:49:55<br />
+**Compiled**: 2021-11-16 23:49:58
 
 ## Introduction
 
@@ -68,11 +68,15 @@ purrr::walk(.x = c("methylKit", "ComplexHeatmap", "genomation"),
 #> * Package already installed: genomation
 ```
 
-Methylation percentage data from 4 “txt” files were loaded.
+Methylation percentage data from 4 “txt” files were loaded. Such input
+files may be obtained from [AMP
+pipeline](http://code.google.com/p/amp-errbs/) developed for aligning
+RRBS reads or from `methylKit::processBismarkAln()` function with “sam”
+or “bam” file name(s) as input(s).
 
 ``` r
 load_file_names <- c("test1.myCpG.txt", "test2.myCpG.txt",
-               "control1.myCpG.txt", "control2.myCpG.txt") %>%
+                     "control1.myCpG.txt", "control2.myCpG.txt") %>%
   purrr::map(~ system.file("extdata", .x, package = "methylKit"))
 
 sample_names <- c("test1", "test2", "ctrl1", "ctrl2")
